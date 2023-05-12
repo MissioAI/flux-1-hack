@@ -1,0 +1,6 @@
+type Person @createModel(accountRelation: SINGLE, description: "A prompt engineer"){
+    firstName: String @string(maxLength: 50)
+    lastName: String @string(maxLength: 50)
+    displayName: String! @string(maxLength: 50)
+    
+}

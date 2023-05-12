@@ -1,0 +1,6 @@
+type ReactNodeFlow @createModel(accountRelation: LIST, description: "React Node Flow"){
+    author: DID! @documentAccount
+    version: CommitID! @documentVersion
+    text: String @string(maxLength: 42069)
+
+}
