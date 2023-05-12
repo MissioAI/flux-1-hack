@@ -86,6 +86,22 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { yieldStream } from "yield-stream";
 
+import { useCeramicContext } from './context';
+import type { BasicProfile } from "@datamodels/identity-profile-basic";
+import { authenticateCeramic } from './utils/CeramicUtils';
+
+import styles from '../Home.module.css';
+
+import { encode as base64_encode } from 'base-64';
+import { decode as base64_decode } from 'base-64';
+
+
+
+/// Create type for reactNode
+// import { authenticateCeramic } from './utils/CeramicUtils.ts'
+
+
+
 function App() {
   const toast = useToast();
 
@@ -95,6 +111,84 @@ function App() {
 
   const [past, setPast] = useState<HistoryItem[]>([]);
   const [future, setFuture] = useState<HistoryItem[]>([]);
+
+   // State variables and functions from LoginPage
+  const clients = useCeramicContext();
+  const { ceramic, composeClient } = clients;
+  
+
+  const [profile, setProfile] = useState<BasicProfile | undefined>();
+  const [loading, setLoading] = useState<boolean>(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+
+
+
+   // Functions from LoginPage
+   const handleLogin = async () => {
+    await authenticateCeramic(ceramic, composeClient);
+    await getProfile();
+  };
+
+
+
+  const getProfile = async () => {
+    setLoading(true);
+    if (ceramic.did !== undefined) {
+      const profile = await composeClient.executeQuery(`
+        query {
+          viewer {
+            basicProfile {
+              id
+              name
+              description
+              gender
+              emoji
+            }
+          }
+        }
+      `);
+
+      setProfile(profile?.data?.viewer?.basicProfile);
+      setLoading(false);
+    }
+  };
+
+  const updateProfile = async () => {
+    setLoading(true);
+    if (ceramic.did !== undefined) {
+      const update = await composeClient.executeQuery(`
+        mutation {
+          createBasicProfile(input: {
+            content: {
+              name: "${profile?.name}"
+              description: "${profile?.description}"
+              gender: "${profile?.gender}"
+              emoji: "${profile?.emoji}"
+            }
+          }) 
+          {
+            document {
+              name
+              description
+              gender
+              emoji
+            }
+          }
+        }
+      `);
+      await getProfile();
+      setLoading(false);
+      setIsLoggedIn(true);
+    }
+  };
+
+  useEffect(() => {
+    if (localStorage.getItem('did')) {
+      handleLogin();
+    }
+  }, []);
+
+
 
   const takeSnapshot = () => {
     // Push the current graph to the past state.
@@ -218,14 +312,42 @@ function App() {
     if (MIXPANEL_TOKEN) mixpanel.track("Zoomed out and centered");
   };
 
-  const save = () => {
+  //this is a function that needs to be replaced with ceramic update function
+  // const save = () => {
+  //   if (reactFlow) {
+  //     localStorage.setItem(
+  //       REACT_FLOW_LOCAL_STORAGE_KEY,
+  //       JSON.stringify(reactFlow.toObject())
+  //     );
+  //   }
+  // };
+
+  const save = async () => {
     if (reactFlow) {
-      localStorage.setItem(
-        REACT_FLOW_LOCAL_STORAGE_KEY,
-        JSON.stringify(reactFlow.toObject())
-      );
+      const nodeAsString = JSON.stringify(reactFlow.toObject());
+      const base64NodeAsString = base64_encode(nodeAsString);
+      if (ceramic.did !== undefined) {
+        debugger;
+        console.log("Submitting node as string")
+        const update = await composeClient.executeQuery(`
+        mutation {
+          createReactNodeFlow(input: {
+            content: {
+              text: "${base64NodeAsString}"
+            }
+          }) 
+          {
+            document {
+             text
+            }
+          }
+        }
+        `);
+        console.log("Executed submission node as string")
+      }
     }
   };
+
 
   // Auto save.
   const isSavingReactFlow = useDebouncedEffect(
@@ -234,10 +356,33 @@ function App() {
     [reactFlow, nodes, edges]
   );
 
-  // Auto restore on load.
+  // Auto restore on load. 
+  //@ts-ignore
   useEffect(() => {
+    async function fetchData() {
     if (reactFlow) {
-      const rawFlow = localStorage.getItem(REACT_FLOW_LOCAL_STORAGE_KEY);
+
+      //this is a function that needs to be replaced with ceramic get function
+      // const rawFlow = localStorage.getItem(REACT_FLOW_LOCAL_STORAGE_KEY);
+      debugger;
+      const ceramicRawFlow = await composeClient.executeQuery(`
+      query{
+        reactNodeFlowIndex(last:1){
+      edges{
+        node{
+          text
+        }
+        
+      }}
+      }
+      `);
+
+      const base64RawFlow = ceramicRawFlow.data?.reactNodeFlowIndex?.edges[0].node?.text;
+
+      const rawFlow = base64_decode(base64RawFlow);
+      
+
+      debugger;
 
       const flow: ReactFlowJsonObject = rawFlow ? JSON.parse(rawFlow) : null;
 
@@ -271,7 +416,11 @@ function App() {
 
       resetURL(); // Get rid of the query params.
     }
+  }
+  fetchData();
   }, [reactFlow]);
+
+  
 
   /*//////////////////////////////////////////////////////////////
                           AI PROMPT CALLBACKS
@@ -340,12 +489,12 @@ function App() {
             x:
               (currentNodeChildren.length > 0
                 ? // If there are already children we want to put the
-                  // next child to the right of the furthest right one.
-                  currentNodeChildren.reduce((prev, current) =>
-                    prev.position.x > current.position.x ? prev : current
-                  ).position.x +
-                  (responses / 2) * 180 +
-                  90
+                // next child to the right of the furthest right one.
+                currentNodeChildren.reduce((prev, current) =>
+                  prev.position.x > current.position.x ? prev : current
+                ).position.x +
+                (responses / 2) * 180 +
+                90
                 : currentNode.position.x) +
               (i - (responses - 1) / 2) * 180,
             // Add OVERLAP_RANDOMNESS_MAX of randomness to the y position so that nodes don't overlap.
@@ -669,10 +818,10 @@ function App() {
           x:
             selectedNodeChildren.length > 0
               ? // If there are already children we want to put the
-                // next child to the right of the furthest right one.
-                selectedNodeChildren.reduce((prev, current) =>
-                  prev.position.x > current.position.x ? prev : current
-                ).position.x + 180
+              // next child to the right of the furthest right one.
+              selectedNodeChildren.reduce((prev, current) =>
+                prev.position.x > current.position.x ? prev : current
+              ).position.x + 180
               : selectedNode.position.x,
           // Add OVERLAP_RANDOMNESS_MAX of randomness to
           // the y position so that nodes don't overlap.
@@ -988,6 +1137,95 @@ function App() {
   /*//////////////////////////////////////////////////////////////
                               APP
   //////////////////////////////////////////////////////////////*/
+
+
+  // If the user is not logged in, show the login screen
+  if (!isLoggedIn) {
+    return (
+      <div className={styles.container}>
+        <main className={styles.main}>
+          <h1 className={styles.title}>Your Decentralized Profile</h1>
+          {/* You need to replace this with an <img /> tag or a react component */}
+          {/* <Image src={ceramicLogo} width="100" height="100" className={styles.logo} /> */}
+          {profile === undefined && ceramic.did === undefined ? (
+            <button
+              onClick={() => {
+                handleLogin();
+              }}
+            >
+              Login
+            </button>
+          ) : (
+            <div className={styles.form}>
+            <div className={styles.formGroup}>
+                <label>Name</label>
+                <input
+                  type="text"
+                  defaultValue={profile?.name || ''}
+                  onChange={(e) => {
+                    setProfile({ ...profile, name: e.target.value });
+                  }}
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label>Description</label>
+                <input
+                  type="text"
+                  defaultValue={profile?.description || ''}
+                  onChange={(e) => {
+                    setProfile({ ...profile, description: e.target.value });
+                  }}
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label>Gender</label>
+                <input
+                  type="text"
+                  defaultValue={profile?.gender || ''}
+                  onChange={(e) => {
+                    setProfile({ ...profile, gender: e.target.value });
+                  }}
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label>Emoji</label>
+                <input
+                  type="text"
+                  defaultValue={profile?.emoji || ''}
+                  onChange={(e) => {
+                    setProfile({ ...profile, emoji: e.target.value });
+                  }}
+                  maxLength={2}
+                />
+              </div>
+              <div className={styles.buttonContainer}>
+                <button
+                onClick={() => {
+                  updateProfile();
+                }}>
+                  {loading ? 'Loading...' : 'Update Profile'}
+                </button>
+              </div>
+            </div>
+          )}
+        </main>
+        <footer className={styles.footer}>
+          <div>
+            <a href="https://developers.ceramic.network" target="_blank">
+              Learn about Ceramic
+            </a>
+          </div>
+          <div>
+            <a href="https://forum.ceramic.network" target="_blank">
+              Ask Questions
+            </a>
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+
 
   return (
     <>
